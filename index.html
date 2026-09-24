@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>BOM Weather (Day &amp; Night)</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      background: #000; color: #e8eaed;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+    body {
+      display: -webkit-box;
+      display: -webkit-flex;
+      display: flex;
+      -webkit-box-orient: vertical;
+      -webkit-flex-direction: column;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ───── forecast (2 rows × 4 days) ───── */
+    .forecast {
+      -webkit-flex: 0 0 15vh;
+      flex: 0 0 15vh;
+      display: -webkit-flex;
+      display: flex;
+      width: 100%;
+      background: #10171e;
+    }
+    .forecast-grid {
+      display: -webkit-flex;
+      display: flex;
+      -webkit-flex-direction: row;
+      flex-direction: row;
+      width: 100%;
+      height: 100%;
+    }
+    .forecast-cell {
+      -webkit-flex: 1 1 0;
+      flex: 1 1 0;
+      height: 100%;
+      box-sizing: border-box;
+      display: -webkit-flex;
+      display: flex;
+      -webkit-flex-direction: column;
+      flex-direction: column;
+      -webkit-align-items: center;
+      align-items: center;
+      -webkit-justify-content: center;
+      justify-content: center;
+      padding: 6px 0;
+      font-size: 16px;
+      color: #e8eaed;
+    }
+    .forecast-cell.today { background: rgba(255,255,255,0.06); }
+    .forecast-day  { font-size: 35px; opacity: 0.9; margin-bottom: 4px; }
+    .forecast-icon { width: 75px; height: 75px; margin-bottom: 4px; }
+    .forecast-text-icon {
+      font-size: 12px; opacity: 0.8; text-align: center;
+      min-height: 64px;
+      display: -webkit-flex;
+      display: flex;
+      -webkit-align-items: center;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .forecast-temps { font-size: 30px; }
+    .forecast-temps .max { color: #fff; font-size: 42px; font-weight:400;}
+    .forecast-temps .min { color: #b3b3b3; margin-left: 6px; }
+
+    /* ───── precipitation chance (next 24h) ───── */
+    .precip {
+      -webkit-flex: 0 0 10vh;
+      flex: 0 0 10vh;
+      display: -webkit-flex;
+      display: flex;
+      -webkit-flex-direction: column;
+      flex-direction: column;
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom:3px;
+      margin-bottom:2px;
+    }
+    .precip-bars {
+      background-color: #d4ecff;
+      position: relative;
+      display: -webkit-flex;
+      display: flex;
+      -webkit-flex-direction: row;
+      flex-direction: row;
+      -webkit-flex: 1 1 auto;
+      flex: 1 1 auto;
+      -webkit-align-items: flex-end;
+      align-items: flex-end;
+      width: 100%;
+      padding: 0 2px;
+      box-sizing: border-box;
+    }
+    .night-overlay {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      background: #1b3f5d;
+      z-index: 1;
+      pointer-events: none;
+    }
+    .precip-labels-bot {
+      background: #10171e;
+      display: -webkit-flex;
+      display: flex;
+      -webkit-flex-direction: row;
+      flex-direction: row;
+      width: 100%;
+      height: 25px;
+      font-size: 25px;
+      line-height: 30px;
+      color: #e5e5e5;
+      margin-bottom: 6px;
+    }
+    .precip-cell {
+      -webkit-flex: 1 1 0;
+      flex: 1 1 0;
+      text-align: center;
+      white-space: nowrap;
+      overflow: visible;
+    }
+    .precip-bar-wrap {
+      -webkit-flex: 1 1 0;
+      flex: 1 1 0;
+      height: 100%;
+      position: relative;
+      z-index: 2;
+      display: -webkit-flex;
+      display: flex;
+      -webkit-align-items: flex-end;
+      align-items: flex-end;
+      padding: 0 1px;
+      box-sizing: border-box;
+    }
+    .precip-bar {
+      width: 100%;
+      background: rgb(139, 197, 231);
+      border-top: 3px solid #4387b2;
+      min-height: 2px;
+      box-sizing: border-box;
+    }
+    .precip-bar-wrap.night .precip-bar {
+      background: rgba(149, 202, 255, 0.4);
+      border-top-color: #f6fbff;
+    }
+    .wind-arrow {
+      position: absolute;
+      left: 50%;
+      top: 4px;
+      z-index: 3;
+      height: auto;
+      transform-origin: 50% 50%;
+      -webkit-transform-origin: 50% 50%;
+      -webkit-transition: -webkit-transform 200ms ease, width 200ms ease;
+      transition: transform 200ms ease, width 200ms ease;
+      pointer-events: none;
+      -webkit-filter: brightness(0.4);
+      filter: brightness(0.4);
+    }
+    .precip-bar-wrap.bar-high .wind-arrow {
+      top: auto;
+      bottom: 4px;
+    }
+    .precip-bar-wrap.night .wind-arrow {
+      -webkit-filter: brightness(1.4);
+      filter: brightness(1.4);
+    }
+
+    /* ───── radar map (fills the rest) ───── */
+    main {
+      -webkit-box-flex: 1;
+      -webkit-flex: 1 1 auto;
+      flex: 1 1 auto;
+      display: -webkit-box;
+      display: -webkit-flex;
+      display: flex;
+      -webkit-box-pack: center;
+      -webkit-justify-content: center;
+      justify-content: center;
+      -webkit-box-align: start;
+      -webkit-align-items: flex-start;
+      align-items: flex-start;
+      overflow: hidden;
+      width: 100%;
+    }
+    /* Use the classic padding-bottom aspect-ratio trick. 480/512 = 93.75% — that's the
+       radar aspect after stripping the 16px BOM top/bottom annotation strips. */
+    .stack {
+      padding-top: 35px;
+      position: relative;
+      width: 100%;
+      padding-bottom: 105%;
+      background: #111;
+      overflow: hidden;
+    }
+    /* Each image is sized so its visible portion (the radar coverage) exactly fills
+       .stack — top 16/512 (~3.333% of stack height) shifted up and out of view,
+       same on the bottom. Image is rendered square (width:100%, height 106.667% of
+       stack = 100% of width), so no geographic distortion. */
+    .stack img {
+      position: absolute;
+      top: -6%;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      image-rendering: -webkit-optimize-contrast;
+      pointer-events: none;
+    }
+    .frame { opacity: 0; -webkit-transition: opacity 400ms ease; transition: opacity 400ms ease; }
+    .frame.active { opacity: 1; }
+    .timestamp {
+      position: absolute;
+      left: 45px;
+      top: 12px;
+      padding: 3px 8px;
+      color: rgba(0,0,0,0.5);
+      font-weight: 600;
+      font-size: 23px;
+      line-height: 1.3;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .clock {
+      opacity: 0.7;
+      position: absolute;
+      left: 10px;
+      top: 14px;
+      width: 32px;
+      height: 32px;
+      pointer-events: none;
+      z-index: 9;
+    }
+    /* ───── night styling for the radar map ─────
+       .forecast and .precip above are permanently dark and never switch. Only
+       .stack and its children follow sunrise/sunset, via .dark on <html>. */
+    .dark .stack { background: #000; }
+    /* No filter on the map layers. The night versions are pre-rendered to
+       *-dark.png / locations-dark.svg and swapped in by src, so the compositor
+       never re-runs a filter pass over a full-screen layer while the radar
+       animation composites. */
+    .dark .timestamp { color: rgba(255,255,255,0.82); }
+    /* The clock's colours are presentation attributes on the inline SVG; CSS
+       rules outrank those, so no scripting is needed to repaint it. */
+    .dark #clock-segment, .dark #clock-progress { fill: rgba(255,255,255,0.35); }
+    .dark .clock circle { stroke: rgba(255,255,255,0.45); }
+    .dark #clock-hour { stroke: rgba(255,255,255,0.7); }
+  </style>
+  <script>
+  /* Pick a theme before first paint so the page never flashes the wrong
+     background. This uses a plain 6am-6pm AEST guess; applyTheme() corrects it
+     with real sunrise/sunset as soon as the forecast lands. */
+  (function () {
+    var h = new Date(new Date().getTime() + 10 * 3600 * 1000).getUTCHours();
+    if (h < 6 || h >= 18) document.documentElement.className = 'dark';
+  })();
+  </script>
+</head>
+<body>
+  <section class="forecast">
+    <div class="forecast-grid" id="forecast-grid"></div>
+  </section>
+  <section class="precip">
+    <div class="precip-bars" id="precip-bars"></div>
+    <div class="precip-labels-bot" id="precip-labels-bot"></div>
+  </section>
+  <main>
+    <div class="stack" id="stack">
+      <img id="background" alt="background" src="background.png" />
+      <img id="topography" alt="topography" src="topography.png" />
+      <span id="cloud-anchor" style="display:none"></span>
+      <img id="locations" alt="locations" src="locations.svg" />
+      <div class="timestamp" id="timestamp"></div>
+      <svg class="clock" viewBox="-50 -50 100 100">
+        <path id="clock-segment"  fill="rgba(0,0,0,0.35)"></path>
+        <path id="clock-progress" fill="rgba(0,0,0,0.35)"></path>
+        <circle r="46" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="1"></circle>
+        <line id="clock-hour" x1="0" y1="0" x2="0" y2="-22" stroke="rgba(0,0,0,0.55)" stroke-width="2.5" stroke-linecap="round"></line>
+      </svg>
+    </div>
+  </main>
+
+  <script>
+  /* ES5 — Safari 9 / iOS 9.3 compatible.
+     No const/let, no arrows, no template literals, no async/await, no fetch,
+     no destructuring, no spread/rest, no optional chaining. */
+  (function () {
+    var CLOUD = { id: 'IDR713', offset: 4, maxFrames: 7 };
+    var RAIN  = { id: 'IDR71B', offset: 0, maxFrames: 7 };
+    var PROBE_DEPTH        = 16;
+    var MINUTE_TICK_MS     = 100;
+    var END_DWELL_MULT     = 3;
+    var REFRESH_MS         = 5 * 60 * 1000;
+    var FORECAST_URL       = 'https://api.weather.bom.gov.au/v1/locations/r3gxc5/forecasts/daily';
+    var HOURLY_URL         = 'https://api.weather.bom.gov.au/v1/locations/r3gxc5/forecasts/hourly';
+    var FORECAST_REFRESH_MS = 30 * 60 * 1000;
+    var PRECIP_HOURS        = 24;
+    var PRECIP_LABEL_STEP   = 3;
+    // Multiplies the computed wind arrow width (1 = unchanged).
+    var WIND_ARROW_SCALE    = 0.7;
+    // Adds this many % points to every hour's rain.chance — useful for previewing
+    // the >50% bar-high arrow placement. Clamped to [0,100]. Set 0 for real data.
+    var PRECIP_SIM_BOOST    = 0;
+    var CLOCK_R = 46;
+
+    var stack         = document.getElementById('stack');
+    var timestampEl   = document.getElementById('timestamp');
+    var locationsEl   = document.getElementById('locations');
+    var cloudAnchor   = document.getElementById('cloud-anchor');
+    var clockSegment  = document.getElementById('clock-segment');
+    var clockProgress = document.getElementById('clock-progress');
+    var clockHour     = document.getElementById('clock-hour');
+
+    var MONTHS    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var ICON_MAP  = {
+      clear: 'clear.svg', sunny: 'sunny.svg', mostly_sunny: 'mostly-sunny.svg',
+      cloudy: 'cloudy.svg', shower: 'showers.svg', fog: 'fog.svg',
+      frost: 'frost.svg', rain: 'rain.svg', snow: 'snow.svg', storm: 'storms.svg',
+      windy: 'windy.svg', light_shower: 'light-showers.svg',
+      heavy_shower: 'heavy-showers.svg', hazy: 'hazy.svg'
+    };
+
+    function pad(n) { return n < 10 ? '0' + n : '' + n; }
+    function aestOf(date) { return new Date(date.getTime() + 10 * 3600 * 1000); }
+
+    function formatAEST(date) {
+      var aest  = aestOf(date);
+      var day   = aest.getUTCDate();
+      var month = MONTHS[aest.getUTCMonth()];
+      var hour  = aest.getUTCHours();
+      var min   = aest.getUTCMinutes();
+      var ampm  = hour >= 12 ? 'pm' : 'am';
+      hour = hour % 12;
+      if (hour === 0) hour = 12;
+      return day + ' ' + month + ' ' + hour + ':' + pad(min) + ' ' + ampm;
+    }
+
+    function arcPath(startDate, endDate) {
+      var startMin = startDate.getUTCMinutes();
+      var spanMin  = Math.min(60, (endDate - startDate) / 60000);
+      if (spanMin <= 0) return '';
+      var startAng = (startMin * 6 - 90) * Math.PI / 180;
+      var endAng   = ((startMin + spanMin) * 6 - 90) * Math.PI / 180;
+      var x1 = (CLOCK_R * Math.cos(startAng)).toFixed(2);
+      var y1 = (CLOCK_R * Math.sin(startAng)).toFixed(2);
+      var x2 = (CLOCK_R * Math.cos(endAng  )).toFixed(2);
+      var y2 = (CLOCK_R * Math.sin(endAng  )).toFixed(2);
+      var largeArc = spanMin > 30 ? 1 : 0;
+      return 'M 0 0 L ' + x1 + ' ' + y1 + ' A ' + CLOCK_R + ' ' + CLOCK_R + ' 0 ' + largeArc + ' 1 ' + x2 + ' ' + y2 + ' Z';
+    }
+
+    function updateClock(startDate, currentDate) {
+      var h = currentDate.getUTCHours() % 12;
+      var m = currentDate.getUTCMinutes();
+      clockHour.setAttribute('transform', 'rotate(' + (h * 30 + m * 0.5).toFixed(2) + ')');
+      clockProgress.setAttribute('d', arcPath(startDate, currentDate));
+    }
+
+    function frameUrl(date, cacheBust, radarId) {
+      var ts = date.getUTCFullYear() + pad(date.getUTCMonth() + 1) + pad(date.getUTCDate()) +
+               pad(date.getUTCHours()) + pad(date.getUTCMinutes());
+      var base = 'https://reg.bom.gov.au/radar/' + radarId + '.T.' + ts + '.png';
+      return cacheBust ? base + '?_=' + cacheBust : base;
+    }
+
+    function snapDown(date, offsetMin) {
+      var d = new Date(date.getTime());
+      d.setUTCSeconds(0, 0);
+      var m = d.getUTCMinutes();
+      d.setUTCMinutes(m - ((m - offsetMin + 5) % 5));
+      return d;
+    }
+
+    // Help old Safari free a decoded image bitmap promptly.
+    function freeImg(img) {
+      if (!img) return;
+      try { img.onload = null; img.onerror = null; img.src = ''; } catch (e) {}
+    }
+
+    function probeImage(url) {
+      return new Promise(function (resolve) {
+        var img = new Image();
+        img.onload  = function () { resolve({ ok: true,  img: img }); };
+        img.onerror = function () { freeImg(img); resolve({ ok: false, img: null }); };
+        img.src = url;
+      });
+    }
+
+    function findFramesFor(product) {
+      var latest = snapDown(new Date(), product.offset);
+      var bust   = Date.now();
+      var candidates = [];
+      var i;
+      for (i = 0; i < PROBE_DEPTH; i++) {
+        var d = new Date(latest.getTime() - i * 5 * 60 * 1000);
+        // Only cache-bust the 2 most recent candidates — those are the only ones
+        // where a stale 404 could mask a freshly published frame. Older frames are
+        // immutable per-URL, so re-using the same URL lets the HTTP cache return
+        // them for free instead of refetching+caching a new copy each cycle (which
+        // is what was exhausting RAM on iPad 1).
+        var b = i < 2 ? bust : 0;
+        candidates.push({ date: d, url: frameUrl(d, b, product.id) });
+      }
+      var promises = [];
+      for (i = 0; i < candidates.length; i++) promises.push(probeImage(candidates[i].url));
+      return Promise.all(promises).then(function (results) {
+        var found = [];
+        for (var j = 0; j < candidates.length; j++) {
+          if (results[j].ok) {
+            found.push({ date: candidates[j].date, img: results[j].img });
+          }
+        }
+        found.reverse();
+        // Keep the newest maxFrames. Free the rest immediately so old WebKit
+        // can reclaim their decoded bitmaps without waiting for a GC pass.
+        var drop = found.length - product.maxFrames;
+        for (var k = 0; k < drop; k++) freeImg(found[k].img);
+        return drop > 0 ? found.slice(drop) : found;
+      });
+    }
+
+    function buildTimeline(rainFrames, cloudFrames) {
+      if (rainFrames.length === 0 && cloudFrames.length === 0) return [];
+      var minTime =  Infinity;
+      var maxTime = -Infinity;
+      var i, t;
+      for (i = 0; i < rainFrames.length; i++) {
+        t = rainFrames[i].date.getTime();
+        if (t < minTime) minTime = t;
+        if (t > maxTime) maxTime = t;
+      }
+      for (i = 0; i < cloudFrames.length; i++) {
+        t = cloudFrames[i].date.getTime();
+        if (t < minTime) minTime = t;
+        if (t > maxTime) maxTime = t;
+      }
+      var slots = [];
+      var ri = -1, ci = -1;
+      for (t = minTime; t <= maxTime; t += 60000) {
+        while (ri + 1 < rainFrames.length  && rainFrames [ri + 1].date.getTime() <= t) ri++;
+        while (ci + 1 < cloudFrames.length && cloudFrames[ci + 1].date.getTime() <= t) ci++;
+        var time = new Date(t);
+        slots.push({
+          time: time,
+          rainImg:  ri >= 0 ? rainFrames [ri].img : null,
+          cloudImg: ci >= 0 ? cloudFrames[ci].img : null,
+          label: formatAEST(time)
+        });
+      }
+      return slots;
+    }
+
+    var rainEls = [], cloudEls = [], timeline = [], slotIdx = 0;
+    var animTimer = null;
+    var activeRain = null, activeCloud = null;
+    var lastNewestRain = 0, lastNewestCloud = 0;
+
+    function startAnimation() {
+      if (timeline.length === 0) return;
+      slotIdx = 0;
+      var startAest = aestOf(timeline[0].time);
+      function tick() {
+        var delay = MINUTE_TICK_MS;
+        try {
+          var slot = timeline[slotIdx];
+          if (slot.rainImg !== activeRain) {
+            if (activeRain)   activeRain.classList.remove('active');
+            if (slot.rainImg) slot.rainImg.classList.add('active');
+            activeRain = slot.rainImg;
+          }
+          if (slot.cloudImg !== activeCloud) {
+            if (activeCloud)   activeCloud.classList.remove('active');
+            if (slot.cloudImg) slot.cloudImg.classList.add('active');
+            activeCloud = slot.cloudImg;
+          }
+          timestampEl.textContent = slot.label;
+          updateClock(startAest, aestOf(slot.time));
+          var isLast = slotIdx === timeline.length - 1;
+          delay = isLast ? MINUTE_TICK_MS * END_DWELL_MULT : MINUTE_TICK_MS;
+          slotIdx = (slotIdx + 1) % timeline.length;
+        } catch (e) {
+          // Don't let one bad frame kill the whole animation on iPad 1.
+        }
+        animTimer = setTimeout(tick, delay);
+      }
+      tick();
+    }
+
+    function removeAll(els) {
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        if (el.parentNode) el.parentNode.removeChild(el);
+        // Release decoded bitmap on old WebKit (radar frames are 512×512 PNGs).
+        freeImg(el);
+      }
+    }
+
+    function loadRadar() {
+      Promise.all([findFramesFor(RAIN), findFramesFor(CLOUD)]).then(function (results) {
+       try {
+        var rainFrames  = results[0];
+        var cloudFrames = results[1];
+        if (rainFrames.length === 0 && cloudFrames.length === 0) return;
+
+        var newestRain  = rainFrames.length  ? rainFrames [rainFrames .length - 1].date.getTime() : 0;
+        var newestCloud = cloudFrames.length ? cloudFrames[cloudFrames.length - 1].date.getTime() : 0;
+        if (newestRain === lastNewestRain && newestCloud === lastNewestCloud) return;
+        lastNewestRain  = newestRain;
+        lastNewestCloud = newestCloud;
+
+        if (animTimer) { clearTimeout(animTimer); animTimer = null; }
+
+        var newRainEls = [];
+        var i, f;
+        for (i = 0; i < rainFrames.length; i++) {
+          f = rainFrames[i];
+          f.img.className = 'frame';
+          f.img.alt = 'rainfall frame';
+          stack.insertBefore(f.img, cloudAnchor);
+          newRainEls.push(f.img);
+        }
+        var newCloudEls = [];
+        for (i = 0; i < cloudFrames.length; i++) {
+          f = cloudFrames[i];
+          f.img.className = 'frame';
+          f.img.alt = 'radar frame';
+          stack.insertBefore(f.img, locationsEl);
+          newCloudEls.push(f.img);
+        }
+
+        var newTimeline = buildTimeline(rainFrames, cloudFrames);
+        var startAest   = aestOf(newTimeline[0].time);
+        var endAest     = aestOf(newTimeline[newTimeline.length - 1].time);
+        clockSegment.setAttribute('d', arcPath(startAest, endAest));
+
+        var slot0 = newTimeline[0];
+        if (slot0.rainImg)  slot0.rainImg.classList.add('active');
+        if (slot0.cloudImg) slot0.cloudImg.classList.add('active');
+        timestampEl.textContent = slot0.label;
+        updateClock(startAest, startAest);
+        removeAll(rainEls);
+        removeAll(cloudEls);
+
+        rainEls = newRainEls;
+        cloudEls = newCloudEls;
+        timeline = newTimeline;
+        activeRain = slot0.rainImg;
+        activeCloud = slot0.cloudImg;
+        startAnimation();
+       } catch (e) { /* swallow so the 5-min interval keeps firing */ }
+      }, function () { /* probe failure — also swallow */ });
+    }
+
+    /* ───── forecast (XHR + manual DOM) ───── */
+    function fetchJson(url, cb) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', url, true);
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState === 4) {
+          if (xhr.status === 200) {
+            try { cb(null, JSON.parse(xhr.responseText)); }
+            catch (e) { cb(e); }
+          } else cb(new Error('HTTP ' + xhr.status));
+        }
+      };
+      xhr.send();
+    }
+
+    function renderCell(day, isToday) {
+      var cell = document.createElement('div');
+      cell.className = 'forecast-cell' + (isToday ? ' today' : '');
+
+      var dayEl = document.createElement('div');
+      dayEl.className = 'forecast-day';
+      dayEl.textContent = isToday ? 'Today' : DAY_NAMES[new Date(day.date).getDay()];
+      cell.appendChild(dayEl);
+
+      var iconFile = ICON_MAP[day.icon_descriptor];
+      if (iconFile) {
+        var img = document.createElement('img');
+        img.className = 'forecast-icon';
+        img.src = 'accuweather-icons/' + iconFile;
+        img.alt = day.icon_descriptor;
+        cell.appendChild(img);
+      } else if (day.icon_descriptor) {
+        var text = document.createElement('div');
+        text.className = 'forecast-text-icon';
+        text.textContent = day.icon_descriptor;
+        cell.appendChild(text);
+      }
+
+      var temps = document.createElement('div');
+      temps.className = 'forecast-temps';
+      if (day.temp_max !== null && day.temp_max !== undefined) {
+        var max = document.createElement('span');
+        max.className = 'max';
+        max.textContent = day.temp_max + '°';
+        temps.appendChild(max);
+      }
+      if (day.temp_min !== null && day.temp_min !== undefined) {
+        var min = document.createElement('span');
+        min.className = 'min';
+        min.textContent = day.temp_min + '°';
+        temps.appendChild(min);
+      }
+      cell.appendChild(temps);
+      return cell;
+    }
+
+    /* ───── wind direction/speed → arrow ───── */
+    var WIND_ANGLES = {
+      N: 180, NNE: 202.5, NE: 225, ENE: 247.5,
+      E: 270, ESE: 292.5, SE: 315, SSE: 337.5,
+      S: 0,   SSW: 22.5,  SW: 45,  WSW: 67.5,
+      W: 90,  WNW: 112.5, NW: 135, NNW: 157.5
+    };
+    // wind_arrow.svg points east at 0deg; offset by -90 so user's angle table works
+    var ARROW_BASE_OFFSET = -90;
+
+    function applyWindArrow(img, direction, speedKmh) {
+      var base = WIND_ANGLES.hasOwnProperty(direction) ? WIND_ANGLES[direction] : 0;
+      var angle = base + ARROW_BASE_OFFSET;
+      var width = Math.min(56, 18 + (speedKmh || 0) * 0.8) * WIND_ARROW_SCALE;
+      var transform = 'translateX(-50%) rotate(' + angle + 'deg)';
+      img.style.width = width + 'px';
+      img.style.transform = transform;
+      img.style.webkitTransform = transform;
+    }
+
+    /* ───── sunrise/sunset → night-hour logic ───── */
+    var sunMap = {};
+    var lastHourlyData = null;
+
+    function aestDateKey(aestDate) {
+      return aestDate.getUTCFullYear() + '-' + pad(aestDate.getUTCMonth() + 1) + '-' + pad(aestDate.getUTCDate());
+    }
+
+    function buildSunMap(daysData) {
+      var map = {};
+      for (var i = 0; i < daysData.length; i++) {
+        var a = daysData[i].astronomical;
+        if (!a || !a.sunrise_time || !a.sunset_time) continue;
+        var rise = new Date(a.sunrise_time);
+        var set  = new Date(a.sunset_time);
+        var key  = aestDateKey(aestOf(rise));
+        map[key] = { riseMs: rise.getTime(), setMs: set.getTime() };
+      }
+      return map;
+    }
+
+    function isNightHour(date) {
+      var key = aestDateKey(aestOf(date));
+      var info = sunMap[key];
+      if (!info) return false;
+      var t = date.getTime();
+      return t < info.riseMs || t >= info.setMs;
+    }
+
+    function loadForecast() {
+      fetchJson(FORECAST_URL, function (err, json) {
+        try {
+          if (err || !json || !json.data) return;
+          sunMap = buildSunMap(json.data);
+          applyTheme();
+          var days = json.data.slice(0, 7);
+          var grid = document.getElementById('forecast-grid');
+          while (grid.firstChild) grid.removeChild(grid.firstChild);
+          for (var i = 0; i < days.length; i++) {
+            grid.appendChild(renderCell(days[i], i === 0));
+          }
+          // Re-render precip now that we have sunrise/sunset info
+          if (lastHourlyData) renderPrecip(lastHourlyData);
+        } catch (e) { /* keep the 30-min interval alive */ }
+      });
+    }
+
+    function formatHour12(h) {
+      var ampm = h >= 12 ? 'pm' : 'am';
+      h = h % 12;
+      if (h === 0) h = 12;
+      return h + ' ' + ampm;
+    }
+
+    function renderPrecip(hours) {
+      var barsEl = document.getElementById('precip-bars');
+      var botEl  = document.getElementById('precip-labels-bot');
+      while (barsEl.firstChild) barsEl.removeChild(barsEl.firstChild);
+      while (botEl.firstChild)  botEl.removeChild(botEl.firstChild);
+
+      var entries = [];
+      var nightFlags = [];
+      for (var i = 0; i < hours.length; i++) {
+        var h = hours[i];
+        var chance = (h.rain && typeof h.rain.chance === 'number') ? h.rain.chance : 0;
+        if (PRECIP_SIM_BOOST) {
+          chance += PRECIP_SIM_BOOST;
+          if (chance < 0)   chance = 0;
+          if (chance > 100) chance = 100;
+        }
+        var hourDate = new Date(h.time);
+        var aestH  = aestOf(hourDate).getUTCHours();
+        var labeled = (i % PRECIP_LABEL_STEP) === 0;
+        var night  = isNightHour(hourDate);
+
+        var wrap = document.createElement('div');
+        wrap.className = 'precip-bar-wrap' + (night ? ' night' : '') + (chance > 50 ? ' bar-high' : '');
+        var bar = document.createElement('div');
+        bar.className = 'precip-bar';
+        wrap.appendChild(bar);
+
+        var w = h.wind || {};
+        var arrow = document.createElement('img');
+        arrow.className = 'wind-arrow';
+        arrow.src = 'wind_arrow.svg';
+        arrow.alt = '';
+        applyWindArrow(arrow, w.direction || '', w.speed_kilometre || 0);
+        wrap.appendChild(arrow);
+
+        barsEl.appendChild(wrap);
+
+        var botCell = document.createElement('div');
+        botCell.className = 'precip-cell';
+        if (labeled) botCell.textContent = formatHour12(aestH);
+        botEl.appendChild(botCell);
+
+        entries.push({ wrap: wrap, bar: bar, chance: chance });
+        nightFlags.push(night);
+      }
+
+      // Add contiguous dark-band overlays for night runs (one div per run so the
+      // band is continuous — the per-wrap padding would otherwise leave gaps).
+      var total = entries.length;
+      if (total > 0) {
+        var runStart = -1;
+        for (var k = 0; k <= total; k++) {
+          var inNight = k < total && nightFlags[k];
+          if (inNight && runStart < 0) runStart = k;
+          else if (!inNight && runStart >= 0) {
+            var ov = document.createElement('div');
+            ov.className = 'night-overlay';
+            ov.style.left  = (runStart / total * 100) + '%';
+            ov.style.width = ((k - runStart) / total * 100) + '%';
+            barsEl.appendChild(ov);
+            runStart = -1;
+          }
+        }
+      }
+
+      // iOS 9 Safari resolves percentage heights of flex items' children to 0.
+      // Measure the bars container after layout and assign pixel heights.
+      setTimeout(function () {
+        var avail = barsEl.clientHeight;
+        if (!avail) {
+          var parent = barsEl.parentNode;
+          if (parent) avail = parent.clientHeight - 28;
+        }
+        if (!avail || avail <= 0) return;
+        for (var j = 0; j < entries.length; j++) {
+          entries[j].wrap.style.height = avail + 'px';
+          var px = Math.round(entries[j].chance / 100 * avail);
+          if (px < 2) px = 2;
+          entries[j].bar.style.height = px + 'px';
+        }
+      }, 0);
+    }
+
+    function loadHourly() {
+      fetchJson(HOURLY_URL, function (err, json) {
+        try {
+          if (err || !json || !json.data) return;
+          lastHourlyData = json.data.slice(0, PRECIP_HOURS);
+          renderPrecip(lastHourlyData);
+        } catch (e) { /* keep the 30-min interval alive */ }
+      });
+    }
+
+    /* ───── day / night theme ───── */
+    var THEME_TICK_MS = 60 * 1000;
+
+    function isNightNow() {
+      var now = new Date();
+      // sunMap is keyed by AEST date and only populated once the daily forecast
+      // arrives; until then fall back to the same 6am-6pm guess used in <head>.
+      if (sunMap[aestDateKey(aestOf(now))]) return isNightHour(now);
+      var h = aestOf(now).getUTCHours();
+      return h < 6 || h >= 18;
+    }
+
+    // Night versions are byte-for-byte the old CSS filters baked in:
+    //   background/topography : brightness(0.45) saturate(0.5) contrast(2)
+    //   locations             : invert(1) brightness(0.88)
+    var MAP_LAYERS = [
+      { id: 'background', day: 'background.png', night: 'background-dark.png' },
+      { id: 'topography', day: 'topography.png', night: 'topography-dark.png' },
+      { id: 'locations',  day: 'locations.svg',  night: 'locations-dark.svg'  }
+    ];
+
+    function applyMapLayers(dark) {
+      for (var i = 0; i < MAP_LAYERS.length; i++) {
+        var L  = MAP_LAYERS[i];
+        var el = document.getElementById(L.id);
+        if (!el) continue;
+        var want = dark ? L.night : L.day;
+        // Compare the attribute, not .src, which resolves to an absolute URL.
+        if (el.getAttribute('src') !== want) el.setAttribute('src', want);
+      }
+    }
+
+    var themeIsDark = null;
+    function applyTheme() {
+      var dark = isNightNow();
+      if (dark === themeIsDark) return;   // only touch the DOM on a transition
+      themeIsDark = dark;
+      // Only the radar map switches. The forecast strip at the top of the page
+      // is permanently dark, so theme-color stays black and is left to the
+      // server-injected tag rather than being rewritten here.
+      document.documentElement.className = dark ? 'dark' : '';
+      applyMapLayers(dark);
+    }
+
+    // Belt-and-braces: a thrown error in setInterval's callback can stop the
+    // interval on some old WebKit builds. Wrap each tick to keep them alive.
+    function safe(fn) { return function () { try { fn(); } catch (e) {} }; }
+
+    safe(applyTheme)();
+    setInterval(safe(applyTheme), THEME_TICK_MS);
+    safe(loadRadar)();
+    setInterval(safe(loadRadar), REFRESH_MS);
+    safe(loadForecast)();
+    setInterval(safe(loadForecast), FORECAST_REFRESH_MS);
+    safe(loadHourly)();
+    setInterval(safe(loadHourly), FORECAST_REFRESH_MS);
+  })();
+  </script>
+</body>
+</html>
