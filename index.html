@@ -786,20 +786,9 @@
       var reach = MARKER_R + STROKE_W / 2;
       var barTops = [];
       for (i = 0; i < n; i++) barTops.push(avail - entries[i].barPx);
-      var geo = { pts: pts, barTops: barTops, cellW: cellW, W: W, reach: reach };
+      var geo = { pts: pts, barTops: barTops, cellW: cellW, avail: avail, reach: reach };
       drawTempLabel(svg, geo, iMax, tMax, entries[iMax].night, true);
       drawTempLabel(svg, geo, iMin, tMin, entries[iMin].night, false);
-    }
-
-    // Topmost y of any precipitation bar within the horizontal span [x0, x1]
-    // (bars sit in cells of width cellW starting at x=2, with 1px side padding).
-    function barCeilingY(barTops, cellW, x0, x1) {
-      var top = Infinity;
-      for (var i = 0; i < barTops.length; i++) {
-        var bx0 = 2 + i * cellW + 1, bx1 = 2 + (i + 1) * cellW - 1;
-        if (bx1 >= x0 && bx0 <= x1 && barTops[i] < top) top = barTops[i];
-      }
-      return top;
     }
 
     // Topmost and bottommost y the temperature line (strokes and markers)
@@ -823,15 +812,14 @@
       return { top: top, bottom: bottom };
     }
 
-    // Places the label clear of both the temperature line and the precip bars.
-    // Tries the preferred side of the line first, then the other side, starting
-    // at the marker and stepping outward half a cell at a time (up to 2 cells).
-    // If no spot is clear, the label is left out rather than overlap anything.
+    // Places the label directly over/under its marker, within that hour's
+    // column. It may sit over a bar's filled area, but must not cross the
+    // temperature line or a bar's top edge (the 3px border). Preferred side of
+    // the line first, then the other side; if neither fits, it's left out.
     function drawTempLabel(svg, geo, idx, temp, night, below) {
       var SVG_NS = 'http://www.w3.org/2000/svg';
-      var FONT = 16, GAP = 2, EDGE = 1, MAX_SHIFT_CELLS = 2;
+      var FONT = 16, GAP = 2, EDGE = 1, BAR_EDGE = 3;
       var DIGIT_H = Math.round(FONT * 0.72);   // digit cap height above baseline
-      var W = geo.W;
       var label = document.createElementNS(SVG_NS, 'text');
       label.setAttribute('font-size', FONT);
       label.setAttribute('font-weight', '600');
@@ -843,34 +831,40 @@
       var w;
       try { w = label.getComputedTextLength(); } catch (e) { w = 0; }
       if (!w) w = label.textContent.length * FONT * 0.6;
+      var cx = geo.pts[idx].x, x0 = cx - w / 2, x1 = cx + w / 2;
 
-      function boxTopAt(cx, sideBelow) {
-        var x0 = cx - w / 2, x1 = cx + w / 2;
-        var r = tempLineYRange(geo.pts, x0, x1, geo.reach);
-        var floor = barCeilingY(geo.barTops, geo.cellW, x0, x1) - GAP;
-        var top = sideBelow ? r.bottom + GAP : r.top - GAP - DIGIT_H;
-        if (top < EDGE || top + DIGIT_H > floor) return null;
-        return top;
+      // Vertical bands the label box must stay GAP away from: the line's
+      // extent under the label, and the top edge of any bar under it.
+      var line = tempLineYRange(geo.pts, x0, x1, geo.reach);
+      var bands = [];
+      for (var i = 0; i < geo.barTops.length; i++) {
+        var bx0 = 2 + i * geo.cellW + 1, bx1 = 2 + (i + 1) * geo.cellW - 1;
+        if (bx1 >= x0 && bx0 <= x1)
+          bands.push({ top: geo.barTops[i], bottom: geo.barTops[i] + BAR_EDGE });
       }
-
-      var step = geo.cellW / 2;
-      var maxK = Math.ceil(MAX_SHIFT_CELLS * geo.cellW / step);
-      var x0 = geo.pts[idx].x;
-      for (var k = 0; k <= maxK; k++) {
-        var offs = k === 0 ? [0] : [k * step, -k * step];
-        for (var o = 0; o < offs.length; o++) {
-          var cx = Math.min(Math.max(x0 + offs[o], EDGE + w / 2), W - EDGE - w / 2);
-          var sides = [below, !below];
-          for (var s = 0; s < 2; s++) {
-            var top = boxTopAt(cx, sides[s]);
-            if (top === null) continue;
-            label.setAttribute('x', cx);
-            label.setAttribute('y', top + DIGIT_H);
-            return;
-          }
+      function hit(top) {
+        for (var b = 0; b < bands.length; b++)
+          if (top < bands[b].bottom + GAP && top + DIGIT_H > bands[b].top - GAP)
+            return bands[b];
+        return null;
+      }
+      // Start next to the line and move away from it past any bar edge in the
+      // way, until the label fits or runs out of strip.
+      function fit(sideBelow) {
+        var top = sideBelow ? line.bottom + GAP : line.top - GAP - DIGIT_H;
+        for (;;) {
+          if (top < EDGE || top + DIGIT_H > geo.avail - EDGE) return null;
+          var b = hit(top);
+          if (!b) return top;
+          top = sideBelow ? b.bottom + GAP : b.top - GAP - DIGIT_H;
         }
       }
-      svg.removeChild(label);
+
+      var top = fit(below);
+      if (top === null) top = fit(!below);
+      if (top === null) { svg.removeChild(label); return; }
+      label.setAttribute('x', cx);
+      label.setAttribute('y', top + DIGIT_H);
     }
 
     // Bumped on every render so a stale deferred layout pass (from a render
