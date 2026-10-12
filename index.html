@@ -335,6 +335,9 @@
     // Hourly temperature line: orange stroke, round markers with a white centre.
     var TEMP_COLOR          = '#fc7305';
     var TEMP_MARKER_FILL    = '#fff';
+    // Min/max labels take the opposite band's background so they read on both.
+    var TEMP_LABEL_DAY      = '#1b3f5d';   // = .night-overlay background
+    var TEMP_LABEL_NIGHT    = '#d4ecff';   // = .precip-bars background
     var CLOCK_R = 46;
 
     var stack         = document.getElementById('stack');
@@ -770,6 +773,104 @@
         svg.appendChild(mark);
       }
       barsEl.appendChild(svg);
+
+      // Max label goes below the max marker, min label above the min marker.
+      // First occurrence wins on ties; skip both when the period is flat.
+      if (tMax === tMin) return;
+      var iMax = -1, iMin = -1;
+      for (i = 0; i < n; i++) {
+        if (entries[i].temp === null) continue;
+        if (iMax < 0 && entries[i].temp === tMax) iMax = i;
+        if (iMin < 0 && entries[i].temp === tMin) iMin = i;
+      }
+      var reach = MARKER_R + STROKE_W / 2;
+      var barTops = [];
+      for (i = 0; i < n; i++) barTops.push(avail - entries[i].barPx);
+      var geo = { pts: pts, barTops: barTops, cellW: cellW, W: W, reach: reach };
+      drawTempLabel(svg, geo, iMax, tMax, entries[iMax].night, true);
+      drawTempLabel(svg, geo, iMin, tMin, entries[iMin].night, false);
+    }
+
+    // Topmost y of any precipitation bar within the horizontal span [x0, x1]
+    // (bars sit in cells of width cellW starting at x=2, with 1px side padding).
+    function barCeilingY(barTops, cellW, x0, x1) {
+      var top = Infinity;
+      for (var i = 0; i < barTops.length; i++) {
+        var bx0 = 2 + i * cellW + 1, bx1 = 2 + (i + 1) * cellW - 1;
+        if (bx1 >= x0 && bx0 <= x1 && barTops[i] < top) top = barTops[i];
+      }
+      return top;
+    }
+
+    // Topmost and bottommost y the temperature line (strokes and markers)
+    // reaches anywhere within the horizontal span [x0, x1].
+    function tempLineYRange(pts, x0, x1, reach) {
+      var top = Infinity, bottom = -Infinity, i, a, b;
+      function take(y) {
+        if (y - reach < top) top = y - reach;
+        if (y + reach > bottom) bottom = y + reach;
+      }
+      for (i = 0; i < pts.length; i++) {
+        a = pts[i];
+        if (a && a.x + reach >= x0 && a.x - reach <= x1) take(a.y);
+        b = pts[i + 1];
+        if (!a || !b) continue;
+        var lo = Math.max(a.x, x0), hi = Math.min(b.x, x1);
+        if (lo > hi) continue;
+        take(a.y + (b.y - a.y) * (lo - a.x) / (b.x - a.x));
+        take(a.y + (b.y - a.y) * (hi - a.x) / (b.x - a.x));
+      }
+      return { top: top, bottom: bottom };
+    }
+
+    // Places the label clear of both the temperature line and the precip bars.
+    // Tries the preferred side of the line first, then the other side, starting
+    // at the marker and stepping outward half a cell at a time (up to 2 cells).
+    // If no spot is clear, the label is left out rather than overlap anything.
+    function drawTempLabel(svg, geo, idx, temp, night, below) {
+      var SVG_NS = 'http://www.w3.org/2000/svg';
+      var FONT = 16, GAP = 2, EDGE = 1, MAX_SHIFT_CELLS = 2;
+      var DIGIT_H = Math.round(FONT * 0.72);   // digit cap height above baseline
+      var W = geo.W;
+      var label = document.createElementNS(SVG_NS, 'text');
+      label.setAttribute('font-size', FONT);
+      label.setAttribute('font-weight', '600');
+      label.setAttribute('fill', night ? TEMP_LABEL_NIGHT : TEMP_LABEL_DAY);
+      label.setAttribute('text-anchor', 'middle');
+      label.textContent = Math.round(temp) + '°';
+      svg.appendChild(label);
+
+      var w;
+      try { w = label.getComputedTextLength(); } catch (e) { w = 0; }
+      if (!w) w = label.textContent.length * FONT * 0.6;
+
+      function boxTopAt(cx, sideBelow) {
+        var x0 = cx - w / 2, x1 = cx + w / 2;
+        var r = tempLineYRange(geo.pts, x0, x1, geo.reach);
+        var floor = barCeilingY(geo.barTops, geo.cellW, x0, x1) - GAP;
+        var top = sideBelow ? r.bottom + GAP : r.top - GAP - DIGIT_H;
+        if (top < EDGE || top + DIGIT_H > floor) return null;
+        return top;
+      }
+
+      var step = geo.cellW / 2;
+      var maxK = Math.ceil(MAX_SHIFT_CELLS * geo.cellW / step);
+      var x0 = geo.pts[idx].x;
+      for (var k = 0; k <= maxK; k++) {
+        var offs = k === 0 ? [0] : [k * step, -k * step];
+        for (var o = 0; o < offs.length; o++) {
+          var cx = Math.min(Math.max(x0 + offs[o], EDGE + w / 2), W - EDGE - w / 2);
+          var sides = [below, !below];
+          for (var s = 0; s < 2; s++) {
+            var top = boxTopAt(cx, sides[s]);
+            if (top === null) continue;
+            label.setAttribute('x', cx);
+            label.setAttribute('y', top + DIGIT_H);
+            return;
+          }
+        }
+      }
+      svg.removeChild(label);
     }
 
     // Bumped on every render so a stale deferred layout pass (from a render
@@ -826,7 +927,8 @@
         botEl.appendChild(botCell);
 
         entries.push({ wrap: wrap, bar: bar, chance: chance,
-                       temp: (typeof h.temp === 'number') ? h.temp : null });
+                       temp: (typeof h.temp === 'number') ? h.temp : null,
+                       night: night });
         nightFlags.push(night);
       }
 
@@ -864,6 +966,7 @@
           var px = Math.round(entries[j].chance / 100 * avail);
           if (px < 2) px = 2;
           entries[j].bar.style.height = px + 'px';
+          entries[j].barPx = px;
         }
         drawTempLine(barsEl, entries, avail);
       }, 0);
