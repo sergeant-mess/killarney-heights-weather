@@ -720,7 +720,7 @@
     // strip and its max at the top.
     function drawTempLine(barsEl, entries, avail) {
       var SVG_NS = 'http://www.w3.org/2000/svg';
-      var PAD = 4, MARKER_R = 3;
+      var PAD = 6, MARKER_R = 4, STROKE_W = 2.2;
       var n = entries.length;
       var tMin = null, tMax = null, i, t;
       for (i = 0; i < n; i++) {
@@ -755,7 +755,7 @@
         seg.setAttribute('x2', pts[i + 1].x);
         seg.setAttribute('y2', pts[i + 1].y);
         seg.setAttribute('stroke', TEMP_COLOR);
-        seg.setAttribute('stroke-width', '1.5');
+        seg.setAttribute('stroke-width', STROKE_W);
         svg.appendChild(seg);
       }
       for (i = 0; i < n; i++) {
@@ -766,7 +766,7 @@
         mark.setAttribute('r', MARKER_R);
         mark.setAttribute('fill', TEMP_MARKER_FILL);
         mark.setAttribute('stroke', TEMP_COLOR);
-        mark.setAttribute('stroke-width', '1.5');
+        mark.setAttribute('stroke-width', STROKE_W);
         svg.appendChild(mark);
       }
       barsEl.appendChild(svg);
