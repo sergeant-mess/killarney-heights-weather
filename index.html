@@ -772,7 +772,13 @@
       barsEl.appendChild(svg);
     }
 
+    // Bumped on every render so a stale deferred layout pass (from a render
+    // that was superseded before its setTimeout fired) doesn't draw a second
+    // temperature line on top of the current one.
+    var precipRenderGen = 0;
+
     function renderPrecip(hours) {
+      var gen = ++precipRenderGen;
       var barsEl = document.getElementById('precip-bars');
       var botEl  = document.getElementById('precip-labels-bot');
       var windEl = document.getElementById('wind-strip');
@@ -846,6 +852,7 @@
       // iOS 9 Safari resolves percentage heights of flex items' children to 0.
       // Measure the bars container after layout and assign pixel heights.
       setTimeout(function () {
+        if (gen !== precipRenderGen) return;
         var avail = barsEl.clientHeight;
         if (!avail) {
           var parent = barsEl.parentNode;
