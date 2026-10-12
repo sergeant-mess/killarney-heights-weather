@@ -79,8 +79,8 @@
 
     /* ───── precipitation chance (next 24h) ───── */
     .precip {
-      -webkit-flex: 0 0 10vh;
-      flex: 0 0 10vh;
+      -webkit-flex: 0 0 12vh;
+      flex: 0 0 12vh;
       display: -webkit-flex;
       display: flex;
       -webkit-flex-direction: column;
@@ -89,6 +89,25 @@
       box-sizing: border-box;
       margin-bottom:3px;
       margin-bottom:2px;
+    }
+    .wind-strip {
+      background: #10171e;
+      display: -webkit-flex;
+      display: flex;
+      -webkit-flex-direction: row;
+      flex-direction: row;
+      -webkit-flex: 0 0 40px;
+      flex: 0 0 40px;
+      height: 40px;
+      width: 100%;
+      padding: 0 2px;
+      box-sizing: border-box;
+    }
+    .wind-cell {
+      -webkit-flex: 1 1 0;
+      flex: 1 1 0;
+      height: 40px;
+      position: relative;
     }
     .precip-bars {
       background-color: #d4ecff;
@@ -138,7 +157,6 @@
       flex: 1 1 0;
       height: 100%;
       position: relative;
-      z-index: 2;
       display: -webkit-flex;
       display: flex;
       -webkit-align-items: flex-end;
@@ -151,6 +169,8 @@
       background: rgb(139, 197, 231);
       border-top: 3px solid #4387b2;
       min-height: 2px;
+      position: relative;
+      z-index: 2;
       box-sizing: border-box;
     }
     .precip-bar-wrap.night .precip-bar {
@@ -160,24 +180,21 @@
     .wind-arrow {
       position: absolute;
       left: 50%;
-      top: 4px;
-      z-index: 3;
+      top: 50%;
       height: auto;
       transform-origin: 50% 50%;
       -webkit-transform-origin: 50% 50%;
       -webkit-transition: -webkit-transform 200ms ease, width 200ms ease;
       transition: transform 200ms ease, width 200ms ease;
       pointer-events: none;
-      -webkit-filter: brightness(0.4);
-      filter: brightness(0.4);
     }
-    .precip-bar-wrap.bar-high .wind-arrow {
-      top: auto;
-      bottom: 4px;
-    }
-    .precip-bar-wrap.night .wind-arrow {
-      -webkit-filter: brightness(1.4);
-      filter: brightness(1.4);
+    .temp-line {
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 3;
+      pointer-events: none;
+      overflow: visible;
     }
 
     /* ───── radar map (fills the rest) ───── */
@@ -274,6 +291,7 @@
     <div class="forecast-grid" id="forecast-grid"></div>
   </section>
   <section class="precip">
+    <div class="wind-strip" id="wind-strip"></div>
     <div class="precip-bars" id="precip-bars"></div>
     <div class="precip-labels-bot" id="precip-labels-bot"></div>
   </section>
@@ -312,8 +330,11 @@
     // Multiplies the computed wind arrow width (1 = unchanged).
     var WIND_ARROW_SCALE    = 0.7;
     // Adds this many % points to every hour's rain.chance — useful for previewing
-    // the >50% bar-high arrow placement. Clamped to [0,100]. Set 0 for real data.
+    // tall bars. Clamped to [0,100]. Set 0 for real data.
     var PRECIP_SIM_BOOST    = 0;
+    // Hourly temperature line: orange stroke, round markers with a white centre.
+    var TEMP_COLOR          = '#fc7305';
+    var TEMP_MARKER_FILL    = '#fff';
     var CLOCK_R = 46;
 
     var stack         = document.getElementById('stack');
@@ -635,7 +656,7 @@
       var base = WIND_ANGLES.hasOwnProperty(direction) ? WIND_ANGLES[direction] : 0;
       var angle = base + ARROW_BASE_OFFSET;
       var width = Math.min(56, 18 + (speedKmh || 0) * 0.8) * WIND_ARROW_SCALE;
-      var transform = 'translateX(-50%) rotate(' + angle + 'deg)';
+      var transform = 'translate(-50%, -50%) rotate(' + angle + 'deg)';
       img.style.width = width + 'px';
       img.style.transform = transform;
       img.style.webkitTransform = transform;
@@ -695,9 +716,67 @@
       return h + ' ' + ampm;
     }
 
+    // Temperature polyline scaled so the period's min sits at the bottom of the
+    // strip and its max at the top.
+    function drawTempLine(barsEl, entries, avail) {
+      var SVG_NS = 'http://www.w3.org/2000/svg';
+      var PAD = 4, MARKER_R = 3;
+      var n = entries.length;
+      var tMin = null, tMax = null, i, t;
+      for (i = 0; i < n; i++) {
+        t = entries[i].temp;
+        if (t === null) continue;
+        if (tMin === null || t < tMin) tMin = t;
+        if (tMax === null || t > tMax) tMax = t;
+      }
+      if (tMin === null) return;
+
+      var W = barsEl.clientWidth;
+      var cellW = (W - 4) / n;
+      var svg = document.createElementNS(SVG_NS, 'svg');
+      svg.setAttribute('class', 'temp-line');
+      svg.setAttribute('width', W);
+      svg.setAttribute('height', avail);
+
+      var pts = [];
+      for (i = 0; i < n; i++) {
+        t = entries[i].temp;
+        if (t === null) { pts.push(null); continue; }
+        var y = tMax === tMin ? avail / 2
+              : PAD + (1 - (t - tMin) / (tMax - tMin)) * (avail - 2 * PAD);
+        pts.push({ x: 2 + (i + 0.5) * cellW, y: y });
+      }
+
+      for (i = 0; i + 1 < n; i++) {
+        if (!pts[i] || !pts[i + 1]) continue;
+        var seg = document.createElementNS(SVG_NS, 'line');
+        seg.setAttribute('x1', pts[i].x);
+        seg.setAttribute('y1', pts[i].y);
+        seg.setAttribute('x2', pts[i + 1].x);
+        seg.setAttribute('y2', pts[i + 1].y);
+        seg.setAttribute('stroke', TEMP_COLOR);
+        seg.setAttribute('stroke-width', '1.5');
+        svg.appendChild(seg);
+      }
+      for (i = 0; i < n; i++) {
+        if (!pts[i]) continue;
+        var mark = document.createElementNS(SVG_NS, 'circle');
+        mark.setAttribute('cx', pts[i].x);
+        mark.setAttribute('cy', pts[i].y);
+        mark.setAttribute('r', MARKER_R);
+        mark.setAttribute('fill', TEMP_MARKER_FILL);
+        mark.setAttribute('stroke', TEMP_COLOR);
+        mark.setAttribute('stroke-width', '1.5');
+        svg.appendChild(mark);
+      }
+      barsEl.appendChild(svg);
+    }
+
     function renderPrecip(hours) {
       var barsEl = document.getElementById('precip-bars');
       var botEl  = document.getElementById('precip-labels-bot');
+      var windEl = document.getElementById('wind-strip');
+      while (windEl.firstChild) windEl.removeChild(windEl.firstChild);
       while (barsEl.firstChild) barsEl.removeChild(barsEl.firstChild);
       while (botEl.firstChild)  botEl.removeChild(botEl.firstChild);
 
@@ -717,7 +796,7 @@
         var night  = isNightHour(hourDate);
 
         var wrap = document.createElement('div');
-        wrap.className = 'precip-bar-wrap' + (night ? ' night' : '') + (chance > 50 ? ' bar-high' : '');
+        wrap.className = 'precip-bar-wrap' + (night ? ' night' : '');
         var bar = document.createElement('div');
         bar.className = 'precip-bar';
         wrap.appendChild(bar);
@@ -728,7 +807,10 @@
         arrow.src = 'wind_arrow.svg';
         arrow.alt = '';
         applyWindArrow(arrow, w.direction || '', w.speed_kilometre || 0);
-        wrap.appendChild(arrow);
+        var windCell = document.createElement('div');
+        windCell.className = 'wind-cell';
+        windCell.appendChild(arrow);
+        windEl.appendChild(windCell);
 
         barsEl.appendChild(wrap);
 
@@ -737,7 +819,8 @@
         if (labeled) botCell.textContent = formatHour12(aestH);
         botEl.appendChild(botCell);
 
-        entries.push({ wrap: wrap, bar: bar, chance: chance });
+        entries.push({ wrap: wrap, bar: bar, chance: chance,
+                       temp: (typeof h.temp === 'number') ? h.temp : null });
         nightFlags.push(night);
       }
 
@@ -766,7 +849,7 @@
         var avail = barsEl.clientHeight;
         if (!avail) {
           var parent = barsEl.parentNode;
-          if (parent) avail = parent.clientHeight - 28;
+          if (parent) avail = parent.clientHeight - 28 - windEl.offsetHeight;
         }
         if (!avail || avail <= 0) return;
         for (var j = 0; j < entries.length; j++) {
@@ -775,6 +858,7 @@
           if (px < 2) px = 2;
           entries[j].bar.style.height = px + 'px';
         }
+        drawTempLine(barsEl, entries, avail);
       }, 0);
     }
 
