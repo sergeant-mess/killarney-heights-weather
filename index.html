@@ -335,9 +335,12 @@
     // Hourly temperature line: orange stroke, round markers with a white centre.
     var TEMP_COLOR          = '#fc7305';
     var TEMP_MARKER_FILL    = '#fff';
-    // Min/max labels take the opposite band's background so they read on both.
-    var TEMP_LABEL_DAY      = '#1b3f5d';   // = .night-overlay background
-    var TEMP_LABEL_NIGHT    = '#d4ecff';   // = .precip-bars background
+    // Min/max label colours by column (day/night) and by whether the label
+    // sits above the bar's top edge or below it, over the bar's filled area.
+    var TEMP_LABEL_DAY_ABOVE   = '#dc6100';
+    var TEMP_LABEL_DAY_BELOW   = '#b14e00';
+    var TEMP_LABEL_NIGHT_ABOVE = '#ffa157';
+    var TEMP_LABEL_NIGHT_BELOW = '#ffd8b8';
     var CLOCK_R = 46;
 
     var stack         = document.getElementById('stack');
@@ -818,12 +821,11 @@
     // the line first, then the other side; if neither fits, it's left out.
     function drawTempLabel(svg, geo, idx, temp, night, below) {
       var SVG_NS = 'http://www.w3.org/2000/svg';
-      var FONT = 16, GAP = 2, EDGE = 1, BAR_EDGE = 3;
+      var FONT = 20, GAP = 4, EDGE = 1, BAR_EDGE = 3;
       var DIGIT_H = Math.round(FONT * 0.72);   // digit cap height above baseline
       var label = document.createElementNS(SVG_NS, 'text');
       label.setAttribute('font-size', FONT);
       label.setAttribute('font-weight', '600');
-      label.setAttribute('fill', night ? TEMP_LABEL_NIGHT : TEMP_LABEL_DAY);
       label.setAttribute('text-anchor', 'middle');
       label.textContent = Math.round(temp) + '°';
       svg.appendChild(label);
@@ -863,6 +865,10 @@
       var top = fit(below);
       if (top === null) top = fit(!below);
       if (top === null) { svg.removeChild(label); return; }
+      var onBar = top >= geo.barTops[idx];
+      label.setAttribute('fill', night
+        ? (onBar ? TEMP_LABEL_NIGHT_BELOW : TEMP_LABEL_NIGHT_ABOVE)
+        : (onBar ? TEMP_LABEL_DAY_BELOW   : TEMP_LABEL_DAY_ABOVE));
       label.setAttribute('x', cx);
       label.setAttribute('y', top + DIGIT_H);
     }
