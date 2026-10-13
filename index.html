@@ -253,7 +253,7 @@
        the bottom of the screen. */
     .timestamp {
       position: absolute;
-      right: 12px;
+      left: 0;   /* set from JS, see setTimestamp() */
       bottom: 12px;
       padding: 3px 8px;
       color: rgba(0,0,0,0.5);
@@ -365,6 +365,41 @@
       return (dst ? 11 : 10) * 3600 * 1000;
     }
     function aestOf(date) { return new Date(date.getTime() + sydneyOffsetMs(date)); }
+
+    // The label's width changes from frame to frame (proportional digits,
+    // "9:05" vs "12:55"), so a right-aligned label would jiggle. Instead the
+    // left edge is fixed where the widest label possible for that date would
+    // need to start to end TIMESTAMP_RIGHT px from the right edge.
+    var TIMESTAMP_RIGHT = 12;
+    var timestampKey = null;
+    function widestText(el, list) {
+      var best = list[0], bestW = -1;
+      for (var i = 0; i < list.length; i++) {
+        el.textContent = list[i];
+        if (el.offsetWidth > bestW) { bestW = el.offsetWidth; best = list[i]; }
+      }
+      return best;
+    }
+    function setTimestamp(label) {
+      var parent = timestampEl.parentNode;
+      var datePart = label.replace(/ \S+ \S+$/, '');   // "13 Oct"
+      var key = datePart + '|' + parent.clientWidth;
+      if (key !== timestampKey) {
+        var probe = timestampEl.cloneNode(false);
+        probe.style.visibility = 'hidden';
+        parent.appendChild(probe);
+        var d = widestText(probe, ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+        var d5 = widestText(probe, ['0', '1', '2', '3', '4', '5']);
+        var hr = widestText(probe, ['10', '11', '12']);
+        var ap = widestText(probe, ['am', 'pm']);
+        probe.textContent = datePart + ' ' + hr + ':' + d5 + d + ' ' + ap;
+        var w = probe.offsetWidth;
+        parent.removeChild(probe);
+        timestampEl.style.left = Math.max(0, parent.clientWidth - w - TIMESTAMP_RIGHT) + 'px';
+        timestampKey = key;
+      }
+      timestampEl.textContent = label;
+    }
 
     function formatAEST(date) {
       var aest  = aestOf(date);
@@ -494,7 +529,7 @@
             if (slot.cloudImg) slot.cloudImg.classList.add('active');
             activeCloud = slot.cloudImg;
           }
-          timestampEl.textContent = slot.label;
+          setTimestamp(slot.label);
           var isLast = slotIdx === timeline.length - 1;
           delay = isLast ? MINUTE_TICK_MS * END_DWELL_MULT : MINUTE_TICK_MS;
           slotIdx = (slotIdx + 1) % timeline.length;
@@ -553,7 +588,7 @@
         var slot0 = newTimeline[0];
         if (slot0.rainImg)  slot0.rainImg.classList.add('active');
         if (slot0.cloudImg) slot0.cloudImg.classList.add('active');
-        timestampEl.textContent = slot0.label;
+        setTimestamp(slot0.label);
         removeAll(rainEls);
         removeAll(cloudEls);
 
