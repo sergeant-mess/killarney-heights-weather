@@ -272,6 +272,19 @@
        never re-runs a filter pass over a full-screen layer while the radar
        animation composites. */
     .dark .timestamp { color: rgba(255,255,255,0.82); }
+    /* Radar animation progress under the timestamp: 0 at the first frame,
+       full (the widest label's width) at the last. Left/width set from JS. */
+    .timestamp-progress {
+      position: absolute;
+      left: 0;
+      bottom: 10px;
+      width: 0;
+      height: 3px;
+      border-radius: 1.5px;
+      background: #8c8c8c;
+      pointer-events: none;
+      z-index: 10;
+    }
   </style>
   <script>
   /* Pick a theme before first paint so the page never flashes the wrong
@@ -300,6 +313,7 @@
       <img id="locations" alt="locations" src="locations.svg" />
     </div>
     <div class="timestamp" id="timestamp"></div>
+    <div class="timestamp-progress" id="timestamp-progress"></div>
   </main>
 
   <script>
@@ -337,6 +351,7 @@
 
     var stack         = document.getElementById('stack');
     var timestampEl   = document.getElementById('timestamp');
+    var progressEl    = document.getElementById('timestamp-progress');
     var locationsEl   = document.getElementById('locations');
     var cloudAnchor   = document.getElementById('cloud-anchor');
 
@@ -372,6 +387,7 @@
     // need to start to end TIMESTAMP_RIGHT px from the right edge.
     var TIMESTAMP_RIGHT = 12;
     var timestampKey = null;
+    var progressFullW = 0;
     function widestText(el, list) {
       var best = list[0], bestW = -1;
       for (var i = 0; i < list.length; i++) {
@@ -380,7 +396,8 @@
       }
       return best;
     }
-    function setTimestamp(label) {
+    // progress: 0 at the first radar frame … 1 at the last.
+    function setTimestamp(label, progress) {
       var parent = timestampEl.parentNode;
       var datePart = label.replace(/ \S+ \S+$/, '');   // "13 Oct"
       var key = datePart + '|' + parent.clientWidth;
@@ -394,11 +411,18 @@
         var ap = widestText(probe, ['am', 'pm']);
         probe.textContent = datePart + ' ' + hr + ':' + d5 + d + ' ' + ap;
         var w = probe.offsetWidth;
+        var cs = window.getComputedStyle(probe);
+        var padL = parseFloat(cs.paddingLeft) || 0, padR = parseFloat(cs.paddingRight) || 0;
         parent.removeChild(probe);
-        timestampEl.style.left = Math.max(0, parent.clientWidth - w - TIMESTAMP_RIGHT) + 'px';
+        var left = Math.max(0, parent.clientWidth - w - TIMESTAMP_RIGHT);
+        timestampEl.style.left = left + 'px';
+        // The line spans the text itself (inside the padding).
+        progressEl.style.left = (left + padL) + 'px';
+        progressFullW = w - padL - padR;
         timestampKey = key;
       }
       timestampEl.textContent = label;
+      progressEl.style.width = Math.round(progress * progressFullW) + 'px';
     }
 
     function formatAEST(date) {
@@ -529,7 +553,7 @@
             if (slot.cloudImg) slot.cloudImg.classList.add('active');
             activeCloud = slot.cloudImg;
           }
-          setTimestamp(slot.label);
+          setTimestamp(slot.label, timeline.length > 1 ? slotIdx / (timeline.length - 1) : 1);
           var isLast = slotIdx === timeline.length - 1;
           delay = isLast ? MINUTE_TICK_MS * END_DWELL_MULT : MINUTE_TICK_MS;
           slotIdx = (slotIdx + 1) % timeline.length;
@@ -588,7 +612,7 @@
         var slot0 = newTimeline[0];
         if (slot0.rainImg)  slot0.rainImg.classList.add('active');
         if (slot0.cloudImg) slot0.cloudImg.classList.add('active');
-        setTimestamp(slot0.label);
+        setTimestamp(slot0.label, 0);
         removeAll(rainEls);
         removeAll(cloudEls);
 
