@@ -362,7 +362,20 @@
     };
 
     function pad(n) { return n < 10 ? '0' + n : '' + n; }
-    function aestOf(date) { return new Date(date.getTime() + 10 * 3600 * 1000); }
+    // Sydney wall-clock time as a Date whose getUTC*() fields read local
+    // time. NSW daylight saving (UTC+11) runs from 2am on the first Sunday of
+    // October to 3am on the first Sunday of April; both switches fall at
+    // 16:00 UTC on the Saturday before.
+    function sydneyOffsetMs(date) {
+      var y = date.getUTCFullYear(), t = date.getTime();
+      function dstSwitch(month) {
+        var firstSun = 1 + (7 - new Date(Date.UTC(y, month, 1)).getUTCDay()) % 7;
+        return Date.UTC(y, month, firstSun) - 8 * 3600 * 1000;
+      }
+      var dst = t < dstSwitch(3) || t >= dstSwitch(9);
+      return (dst ? 11 : 10) * 3600 * 1000;
+    }
+    function aestOf(date) { return new Date(date.getTime() + sydneyOffsetMs(date)); }
 
     function formatAEST(date) {
       var aest  = aestOf(date);
