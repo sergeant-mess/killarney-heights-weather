@@ -221,6 +221,7 @@
       -webkit-align-items: flex-start;
       align-items: flex-start;
       overflow: hidden;
+      position: relative;
       width: 100%;
     }
     /* Use the classic padding-bottom aspect-ratio trick. 480/512 = 93.75% — that's the
@@ -248,10 +249,12 @@
     }
     .frame { opacity: 0; -webkit-transition: opacity 400ms ease; transition: opacity 400ms ease; }
     .frame.active { opacity: 1; }
+    /* Pinned to <main> (the visible map area), not .stack, which runs past
+       the bottom of the screen. */
     .timestamp {
       position: absolute;
-      left: 45px;
-      top: 12px;
+      right: 12px;
+      bottom: 12px;
       padding: 3px 8px;
       color: rgba(0,0,0,0.5);
       font-weight: 600;
@@ -295,8 +298,8 @@
       <img id="topography" alt="topography" src="topography.png" />
       <span id="cloud-anchor" style="display:none"></span>
       <img id="locations" alt="locations" src="locations.svg" />
-      <div class="timestamp" id="timestamp"></div>
     </div>
+    <div class="timestamp" id="timestamp"></div>
   </main>
 
   <script>
