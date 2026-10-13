@@ -77,8 +77,9 @@
     .forecast-temps .max { color: #fff; font-size: 42px; font-weight:400;}
     .forecast-temps .min { color: #b3b3b3; margin-left: 6px; }
 
-    /* ───── precipitation chance (next 24h) ───── */
+    /* ───── precipitation chance (24h window over ~72h, swipeable) ───── */
     .precip {
+      overflow: hidden;
       -webkit-flex: 0 0 12vh;
       flex: 0 0 12vh;
       display: -webkit-flex;
@@ -89,6 +90,12 @@
       box-sizing: border-box;
       margin-bottom:3px;
       margin-bottom:2px;
+    }
+    /* The three rows are wider than the screen and slide together. */
+    .precip-row {
+      will-change: transform;
+      -webkit-transform: translate3d(0, 0, 0);
+      transform: translate3d(0, 0, 0);
     }
     .wind-strip {
       background: #10171e;
@@ -144,6 +151,8 @@
       line-height: 30px;
       color: #e5e5e5;
       margin-bottom: 6px;
+      padding: 0 2px;
+      box-sizing: border-box;
     }
     .precip-cell {
       -webkit-flex: 1 1 0;
@@ -276,9 +285,9 @@
     <div class="forecast-grid" id="forecast-grid"></div>
   </section>
   <section class="precip">
-    <div class="wind-strip" id="wind-strip"></div>
-    <div class="precip-bars" id="precip-bars"></div>
-    <div class="precip-labels-bot" id="precip-labels-bot"></div>
+    <div class="wind-strip precip-row" id="wind-strip"></div>
+    <div class="precip-bars precip-row" id="precip-bars"></div>
+    <div class="precip-labels-bot precip-row" id="precip-labels-bot"></div>
   </section>
   <main>
     <div class="stack" id="stack">
@@ -304,7 +313,9 @@
     var FORECAST_URL       = 'https://api.weather.bom.gov.au/v1/locations/r3gxc5/forecasts/daily';
     var HOURLY_URL         = 'https://api.weather.bom.gov.au/v1/locations/r3gxc5/forecasts/hourly';
     var FORECAST_REFRESH_MS = 30 * 60 * 1000;
-    var PRECIP_HOURS        = 24;
+    var PRECIP_HOURS        = 24;   // hours visible at once
+    var PRECIP_TOTAL_HOURS  = 72;   // hours loaded into the swipeable strip
+    var PRECIP_IDLE_RETURN_MS = 60 * 1000;   // untouched this long → back to now
     var PRECIP_LABEL_STEP   = 3;
     // Multiplies the computed wind arrow width (1 = unchanged).
     var WIND_ARROW_SCALE    = 0.7;
@@ -685,14 +696,17 @@
       return h + ' ' + ampm;
     }
 
-    // Temperature polyline scaled so the period's min sits at the bottom of the
-    // strip and its max at the top.
-    function drawTempLine(barsEl, entries, avail) {
+    // Temperature polyline across the whole strip, scaled so the min of the
+    // visible window [winStart, winStart + PRECIP_HOURS) sits at the bottom and
+    // its max at the top. Hours outside the window that go beyond that range
+    // are pinned to the top or bottom edge.
+    function drawTempLine(barsEl, entries, avail, winStart) {
       var SVG_NS = 'http://www.w3.org/2000/svg';
       var PAD = 6, MARKER_R = 4, STROKE_W = 2.2;
       var n = entries.length;
+      var winEnd = Math.min(n, winStart + PRECIP_HOURS);
       var tMin = null, tMax = null, i, t;
-      for (i = 0; i < n; i++) {
+      for (i = winStart; i < winEnd; i++) {
         t = entries[i].temp;
         if (t === null) continue;
         if (tMin === null || t < tMin) tMin = t;
@@ -711,8 +725,10 @@
       for (i = 0; i < n; i++) {
         t = entries[i].temp;
         if (t === null) { pts.push(null); continue; }
-        var y = tMax === tMin ? avail / 2
+        var y = tMax === tMin ? (t > tMax ? PAD : t < tMin ? avail - PAD : avail / 2)
               : PAD + (1 - (t - tMin) / (tMax - tMin)) * (avail - 2 * PAD);
+        if (y < PAD) y = PAD;
+        if (y > avail - PAD) y = avail - PAD;
         pts.push({ x: 2 + (i + 0.5) * cellW, y: y });
       }
 
@@ -744,7 +760,7 @@
       // First occurrence wins on ties; skip both when the period is flat.
       if (tMax === tMin) return;
       var iMax = -1, iMin = -1;
-      for (i = 0; i < n; i++) {
+      for (i = winStart; i < winEnd; i++) {
         if (entries[i].temp === null) continue;
         if (iMax < 0 && entries[i].temp === tMax) iMax = i;
         if (iMin < 0 && entries[i].temp === tMin) iMin = i;
@@ -849,6 +865,13 @@
       while (windEl.firstChild) windEl.removeChild(windEl.firstChild);
       while (barsEl.firstChild) barsEl.removeChild(barsEl.firstChild);
       while (botEl.firstChild)  botEl.removeChild(botEl.firstChild);
+      precipEntries = null;
+      precipHours = hours.length;
+      // Each row holds every hour at 1/PRECIP_HOURS of the visible width
+      // (less the rows' 2px side padding), so they all scroll in step.
+      var rowW = 'calc((100% - 4px) * ' + (hours.length / PRECIP_HOURS) + ' + 4px)';
+      windEl.style.width = barsEl.style.width = botEl.style.width = rowW;
+      setStripX(-scrollHours * hourStepPx());
 
       var entries = [];
       var nightFlags = [];
@@ -931,9 +954,157 @@
           entries[j].bar.style.height = px + 'px';
           entries[j].barPx = px;
         }
-        drawTempLine(barsEl, entries, avail);
+        precipEntries = entries;
+        precipAvail = avail;
+        drawTempLine(barsEl, entries, avail, scrollHours);
       }, 0);
     }
+
+    // Redraws only the temperature line for the current window (bars stay).
+    function redrawTempLine() {
+      if (!precipEntries) return;
+      var barsEl = document.getElementById('precip-bars');
+      for (var i = barsEl.childNodes.length - 1; i >= 0; i--) {
+        var c = barsEl.childNodes[i];
+        if (c.getAttribute && c.getAttribute('class') === 'temp-line') barsEl.removeChild(c);
+      }
+      drawTempLine(barsEl, precipEntries, precipAvail, scrollHours);
+    }
+
+    /* ───── swipeable strip ─────
+       Behaves like the iOS Clock alarm picker: follows the finger, keeps
+       gliding after a quick swipe and slows down, settles on a whole hour.
+       Positions are in px; 0 = first hour at the left edge, negative = later. */
+    var GLIDE_PROJECT_MS = 500;   // how far a swipe carries: speed × this
+    var GLIDE_TAU_MS     = 325;   // slow-down time constant of the settle
+    var EDGE_RESIST      = 0.33;  // finger-to-strip ratio past either end
+    var scrollHours = 0;          // whole hours scrolled while at rest
+    var precipHours = 0;          // hours loaded into the strip
+    var precipEntries = null, precipAvail = 0;
+    var stripX = 0;
+    var dragging = false, animFrame = 0, idleTimer = 0, renderPending = false;
+    var dragStartFinger = 0, dragStartX = 0, samples = [];
+
+    function hourStepPx() {
+      var sec = document.getElementById('precip-bars').parentNode;
+      return (sec.clientWidth - 4) / PRECIP_HOURS;
+    }
+    function maxScrollHours() { return Math.max(0, precipHours - PRECIP_HOURS); }
+
+    function setStripX(x) {
+      stripX = x;
+      var t = 'translate3d(' + x + 'px,0,0)';
+      var ids = ['wind-strip', 'precip-bars', 'precip-labels-bot'];
+      for (var i = 0; i < ids.length; i++) {
+        var st = document.getElementById(ids[i]).style;
+        st.webkitTransform = t;
+        st.transform = t;
+      }
+    }
+
+    function stopAnim() {
+      if (animFrame) cancelAnimationFrame(animFrame);
+      animFrame = 0;
+    }
+
+    // Strip has come to rest on a whole hour.
+    function settle() {
+      var step = hourStepPx();
+      scrollHours = step > 0 ? Math.round(-stripX / step) : 0;
+      if (scrollHours < 0) scrollHours = 0;
+      if (scrollHours > maxScrollHours()) scrollHours = maxScrollHours();
+      setStripX(-scrollHours * step);
+      if (renderPending) { renderPending = false; renderHourly(true); }
+      else redrawTempLine();
+      clearTimeout(idleTimer);
+      if (scrollHours > 0) idleTimer = setTimeout(returnToNow, PRECIP_IDLE_RETURN_MS);
+    }
+
+    // Exponential approach to target: fast at first, slowing to a stop.
+    function glideTo(target) {
+      stopAnim();
+      var x0 = stripX, t0 = Date.now();
+      function frame() {
+        var x = target - (target - x0) * Math.exp(-(Date.now() - t0) / GLIDE_TAU_MS);
+        if (Math.abs(target - x) < 0.5) { animFrame = 0; setStripX(target); settle(); return; }
+        setStripX(x);
+        animFrame = requestAnimationFrame(frame);
+      }
+      animFrame = requestAnimationFrame(frame);
+    }
+
+    // Eases back to the current hour: speeds up, then slows down.
+    function returnToNow() {
+      if (dragging || stripX === 0) return;
+      stopAnim();
+      var x0 = stripX, t0 = Date.now();
+      var dur = Math.min(1200, Math.max(500, 400 + scrollHours * 15));
+      function frame() {
+        var p = Math.min(1, (Date.now() - t0) / dur);
+        var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+        setStripX(x0 * (1 - e));
+        if (p >= 1) { animFrame = 0; settle(); return; }
+        animFrame = requestAnimationFrame(frame);
+      }
+      animFrame = requestAnimationFrame(frame);
+    }
+
+    function dragStart(fingerX) {
+      stopAnim();
+      clearTimeout(idleTimer);
+      dragging = true;
+      dragStartFinger = fingerX;
+      dragStartX = stripX;
+      samples = [{ t: Date.now(), x: stripX }];
+    }
+
+    function dragMove(fingerX) {
+      if (!dragging) return;
+      var minX = -maxScrollHours() * hourStepPx();
+      var x = dragStartX + fingerX - dragStartFinger;
+      if (x > 0) x = x * EDGE_RESIST;
+      else if (x < minX) x = minX + (x - minX) * EDGE_RESIST;
+      setStripX(x);
+      var now = Date.now();
+      samples.push({ t: now, x: x });
+      while (samples.length > 2 && now - samples[0].t > 100) samples.shift();
+    }
+
+    function dragEnd() {
+      if (!dragging) return;
+      dragging = false;
+      var step = hourStepPx();
+      var minX = -maxScrollHours() * step;
+      var v = 0, first = samples[0], last = samples[samples.length - 1];
+      // A finger that stopped before lifting carries no speed.
+      if (Date.now() - last.t < 100 && last.t > first.t) v = (last.x - first.x) / (last.t - first.t);
+      var target = stripX + v * GLIDE_PROJECT_MS;
+      target = step > 0 ? Math.round(target / step) * step : 0;
+      if (target > 0) target = 0;
+      if (target < minX) target = minX;
+      glideTo(target);
+    }
+
+    (function () {
+      var sec = document.getElementById('precip-bars').parentNode;
+      sec.addEventListener('touchstart', function (e) {
+        if (e.touches.length === 1) dragStart(e.touches[0].clientX);
+      }, false);
+      sec.addEventListener('touchmove', function (e) {
+        e.preventDefault();
+        if (e.touches.length) dragMove(e.touches[0].clientX);
+      }, false);
+      sec.addEventListener('touchend', dragEnd, false);
+      sec.addEventListener('touchcancel', dragEnd, false);
+      // Mouse, for testing on a desktop browser.
+      sec.addEventListener('mousedown', function (e) { e.preventDefault(); dragStart(e.clientX); }, false);
+      window.addEventListener('mousemove', function (e) { dragMove(e.clientX); }, false);
+      window.addEventListener('mouseup', dragEnd, false);
+      window.addEventListener('resize', function () {
+        if (dragging || animFrame) { renderPending = true; return; }
+        renderHourly(true);
+      }, false);
+    })();
 
     function loadHourly() {
       fetchJson(HOURLY_URL, function (err, json) {
@@ -945,17 +1116,26 @@
       });
     }
 
-    // Shows the next PRECIP_HOURS starting at the current hour, so the strip
+    // Loads PRECIP_TOTAL_HOURS starting at the current hour, so the strip
     // keeps advancing even if a refresh fails. Unless forced, only re-renders
-    // when the first visible hour has changed.
+    // when the first hour has changed. If the strip is scrolled ahead, the
+    // same hours stay in view; while it's being touched or moving, the
+    // re-render waits until it settles.
     var hourlyFirstTime = null;
     function renderHourly(force) {
       if (!lastHourlyData) return;
       var now = Date.now(), start = 0;
       while (start < lastHourlyData.length - 1 &&
              new Date(lastHourlyData[start].time).getTime() + 3600 * 1000 <= now) start++;
-      var hours = lastHourlyData.slice(start, start + PRECIP_HOURS);
+      var hours = lastHourlyData.slice(start, start + PRECIP_TOTAL_HOURS);
       if (!force && hours[0].time === hourlyFirstTime) return;
+      if (dragging || animFrame) { renderPending = true; return; }
+      if (hourlyFirstTime !== null) {
+        var shift = Math.round((new Date(hours[0].time).getTime() -
+                                new Date(hourlyFirstTime).getTime()) / 3600000);
+        scrollHours -= shift;
+      }
+      scrollHours = Math.max(0, Math.min(scrollHours, hours.length - PRECIP_HOURS));
       hourlyFirstTime = hours[0].time;
       renderPrecip(hours);
     }
