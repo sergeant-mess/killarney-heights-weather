@@ -251,16 +251,6 @@
       pointer-events: none;
       z-index: 10;
     }
-    .clock {
-      opacity: 0.7;
-      position: absolute;
-      left: 10px;
-      top: 14px;
-      width: 32px;
-      height: 32px;
-      pointer-events: none;
-      z-index: 9;
-    }
     /* ───── night styling for the radar map ─────
        .forecast and .precip above are permanently dark and never switch. Only
        .stack and its children follow sunrise/sunset, via .dark on <html>. */
@@ -270,11 +260,6 @@
        never re-runs a filter pass over a full-screen layer while the radar
        animation composites. */
     .dark .timestamp { color: rgba(255,255,255,0.82); }
-    /* The clock's colours are presentation attributes on the inline SVG; CSS
-       rules outrank those, so no scripting is needed to repaint it. */
-    .dark #clock-segment, .dark #clock-progress { fill: rgba(255,255,255,0.35); }
-    .dark .clock circle { stroke: rgba(255,255,255,0.45); }
-    .dark #clock-hour { stroke: rgba(255,255,255,0.7); }
   </style>
   <script>
   /* Pick a theme before first paint so the page never flashes the wrong
@@ -302,12 +287,6 @@
       <span id="cloud-anchor" style="display:none"></span>
       <img id="locations" alt="locations" src="locations.svg" />
       <div class="timestamp" id="timestamp"></div>
-      <svg class="clock" viewBox="-50 -50 100 100">
-        <path id="clock-segment"  fill="rgba(0,0,0,0.35)"></path>
-        <path id="clock-progress" fill="rgba(0,0,0,0.35)"></path>
-        <circle r="46" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="1"></circle>
-        <line id="clock-hour" x1="0" y1="0" x2="0" y2="-22" stroke="rgba(0,0,0,0.55)" stroke-width="2.5" stroke-linecap="round"></line>
-      </svg>
     </div>
   </main>
 
@@ -341,15 +320,11 @@
     var TEMP_LABEL_DAY_BELOW   = '#b14e00';
     var TEMP_LABEL_NIGHT_ABOVE = '#ffa157';
     var TEMP_LABEL_NIGHT_BELOW = '#ffd8b8';
-    var CLOCK_R = 46;
 
     var stack         = document.getElementById('stack');
     var timestampEl   = document.getElementById('timestamp');
     var locationsEl   = document.getElementById('locations');
     var cloudAnchor   = document.getElementById('cloud-anchor');
-    var clockSegment  = document.getElementById('clock-segment');
-    var clockProgress = document.getElementById('clock-progress');
-    var clockHour     = document.getElementById('clock-hour');
 
     var MONTHS    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     var DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -387,27 +362,6 @@
       hour = hour % 12;
       if (hour === 0) hour = 12;
       return day + ' ' + month + ' ' + hour + ':' + pad(min) + ' ' + ampm;
-    }
-
-    function arcPath(startDate, endDate) {
-      var startMin = startDate.getUTCMinutes();
-      var spanMin  = Math.min(60, (endDate - startDate) / 60000);
-      if (spanMin <= 0) return '';
-      var startAng = (startMin * 6 - 90) * Math.PI / 180;
-      var endAng   = ((startMin + spanMin) * 6 - 90) * Math.PI / 180;
-      var x1 = (CLOCK_R * Math.cos(startAng)).toFixed(2);
-      var y1 = (CLOCK_R * Math.sin(startAng)).toFixed(2);
-      var x2 = (CLOCK_R * Math.cos(endAng  )).toFixed(2);
-      var y2 = (CLOCK_R * Math.sin(endAng  )).toFixed(2);
-      var largeArc = spanMin > 30 ? 1 : 0;
-      return 'M 0 0 L ' + x1 + ' ' + y1 + ' A ' + CLOCK_R + ' ' + CLOCK_R + ' 0 ' + largeArc + ' 1 ' + x2 + ' ' + y2 + ' Z';
-    }
-
-    function updateClock(startDate, currentDate) {
-      var h = currentDate.getUTCHours() % 12;
-      var m = currentDate.getUTCMinutes();
-      clockHour.setAttribute('transform', 'rotate(' + (h * 30 + m * 0.5).toFixed(2) + ')');
-      clockProgress.setAttribute('d', arcPath(startDate, currentDate));
     }
 
     function frameUrl(date, cacheBust, radarId) {
@@ -512,7 +466,6 @@
     function startAnimation() {
       if (timeline.length === 0) return;
       slotIdx = 0;
-      var startAest = aestOf(timeline[0].time);
       function tick() {
         var delay = MINUTE_TICK_MS;
         try {
@@ -528,7 +481,6 @@
             activeCloud = slot.cloudImg;
           }
           timestampEl.textContent = slot.label;
-          updateClock(startAest, aestOf(slot.time));
           var isLast = slotIdx === timeline.length - 1;
           delay = isLast ? MINUTE_TICK_MS * END_DWELL_MULT : MINUTE_TICK_MS;
           slotIdx = (slotIdx + 1) % timeline.length;
@@ -583,15 +535,11 @@
         }
 
         var newTimeline = buildTimeline(rainFrames, cloudFrames);
-        var startAest   = aestOf(newTimeline[0].time);
-        var endAest     = aestOf(newTimeline[newTimeline.length - 1].time);
-        clockSegment.setAttribute('d', arcPath(startAest, endAest));
 
         var slot0 = newTimeline[0];
         if (slot0.rainImg)  slot0.rainImg.classList.add('active');
         if (slot0.cloudImg) slot0.cloudImg.classList.add('active');
         timestampEl.textContent = slot0.label;
-        updateClock(startAest, startAest);
         removeAll(rainEls);
         removeAll(cloudEls);
 
