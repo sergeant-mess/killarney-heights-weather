@@ -595,7 +595,9 @@
     /* ───── forecast (XHR + manual DOM) ───── */
     function fetchJson(url, cb) {
       var xhr = new XMLHttpRequest();
-      xhr.open('GET', url, true);
+      // Cache-bust: iOS Safari can keep serving a cached XHR response for
+      // hours, freezing the forecast strips on whatever was first loaded.
+      xhr.open('GET', url + (url.indexOf('?') < 0 ? '?' : '&') + '_=' + Date.now(), true);
       xhr.onreadystatechange = function () {
         if (xhr.readyState === 4) {
           if (xhr.status === 200) {
@@ -710,7 +712,7 @@
             grid.appendChild(renderCell(days[i], i === 0));
           }
           // Re-render precip now that we have sunrise/sunset info
-          if (lastHourlyData) renderPrecip(lastHourlyData);
+          renderHourly(true);
         } catch (e) { /* keep the 30-min interval alive */ }
       });
     }
@@ -976,10 +978,25 @@
       fetchJson(HOURLY_URL, function (err, json) {
         try {
           if (err || !json || !json.data) return;
-          lastHourlyData = json.data.slice(0, PRECIP_HOURS);
-          renderPrecip(lastHourlyData);
+          lastHourlyData = json.data;
+          renderHourly(true);
         } catch (e) { /* keep the 30-min interval alive */ }
       });
+    }
+
+    // Shows the next PRECIP_HOURS starting at the current hour, so the strip
+    // keeps advancing even if a refresh fails. Unless forced, only re-renders
+    // when the first visible hour has changed.
+    var hourlyFirstTime = null;
+    function renderHourly(force) {
+      if (!lastHourlyData) return;
+      var now = Date.now(), start = 0;
+      while (start < lastHourlyData.length - 1 &&
+             new Date(lastHourlyData[start].time).getTime() + 3600 * 1000 <= now) start++;
+      var hours = lastHourlyData.slice(start, start + PRECIP_HOURS);
+      if (!force && hours[0].time === hourlyFirstTime) return;
+      hourlyFirstTime = hours[0].time;
+      renderPrecip(hours);
     }
 
     /* ───── day / night theme ───── */
@@ -1038,6 +1055,18 @@
     setInterval(safe(loadForecast), FORECAST_REFRESH_MS);
     safe(loadHourly)();
     setInterval(safe(loadHourly), FORECAST_REFRESH_MS);
+    setInterval(safe(function () { renderHourly(false); }), THEME_TICK_MS);
+
+    // iOS suspends timers while the iPad sleeps or Safari is in the
+    // background; refresh straight away when the page becomes visible again.
+    function onWake() {
+      if (document.hidden) return;
+      safe(applyTheme)();
+      safe(loadForecast)();
+      safe(loadHourly)();
+    }
+    document.addEventListener('visibilitychange', onWake, false);
+    window.addEventListener('pageshow', function (e) { if (e.persisted) onWake(); }, false);
   })();
   </script>
 </body>
